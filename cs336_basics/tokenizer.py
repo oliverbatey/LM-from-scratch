@@ -1,0 +1,229 @@
+import os
+import regex as re
+
+from collections import defaultdict, Counter
+from typing import BinaryIO
+
+
+def find_chunk_boundaries(
+    file: BinaryIO,
+    desired_num_chunks: int,
+    split_special_token: bytes,
+) -> list[int]:
+    """
+    Chunk the file into parts that can be counted independently.
+    May return fewer chunks if the boundaries end up overlapping.
+    """
+    assert isinstance(
+        split_special_token, bytes
+    ), "Must represent special token as a bytestring"
+
+    # Get total file size in bytes
+    file.seek(0, os.SEEK_END)
+    file_size = file.tell()
+    file.seek(0)
+
+    chunk_size = file_size // desired_num_chunks
+
+    # Initial guesses for chunk boundary locations, uniformly spaced
+    # Chunks start on previous index, don't include last index
+    chunk_boundaries = [i * chunk_size for i in range(desired_num_chunks + 1)]
+    chunk_boundaries[-1] = file_size
+
+    mini_chunk_size = 4096  # Read ahead by 4k bytes at a time
+
+    for bi in range(1, len(chunk_boundaries) - 1):
+        initial_position = chunk_boundaries[bi]
+        file.seek(initial_position)  # Start at boundary guess
+        while True:
+            mini_chunk = file.read(mini_chunk_size)  # Read a mini chunk
+
+            # If EOF, this boundary should be at the end of the file
+            if mini_chunk == b"":
+                chunk_boundaries[bi] = file_size
+                break
+
+            # Find the special token in the mini chunk
+            found_at = mini_chunk.find(split_special_token)
+            if found_at != -1:
+                chunk_boundaries[bi] = initial_position + found_at
+                break
+            initial_position += mini_chunk_size
+
+    # Make sure all boundaries are unique, but might be fewer than desired_num_chunks
+    return sorted(set(chunk_boundaries))
+
+
+def read_text_file_as_chunks(path: str) -> str:
+    """
+    Read the first chunk of a text file, split at document boundaries.
+
+    Args:
+        path: Path to the text file to read.
+
+    Returns:
+        The first chunk of text as a UTF-8 decoded string.
+    """
+    with open(path, "rb") as f:
+        num_processes = 4
+        boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
+        # Just read the first chunk for testing
+        start, end = boundaries[0], boundaries[1]
+        f.seek(start)
+        chunk = f.read(end - start).decode("utf-8", errors="ignore")
+        return chunk
+
+
+def initialise_vocab(special_tokens: list[str]) -> dict[int, bytes]:
+    """
+    Initialize the BPE vocabulary with single bytes and special tokens.
+
+    Creates a base vocabulary mapping token IDs 0-255 to their corresponding
+    single-byte values, then appends special tokens starting at ID 256.
+
+    Args:
+        special_tokens: List of special token strings (e.g., ["<|endoftext|>"]).
+
+    Returns:
+        A dictionary mapping token IDs to their byte representations.
+    """
+    vocab = {i: bytes([i]) for i in range(256)}
+
+    next_id = 256
+    for token in special_tokens:
+        vocab[next_id] = token.encode("utf-8")
+        next_id += 1
+    return vocab
+
+
+def get_pretoken_counts(text: str) -> dict[tuple[int, ...], int]:
+    """
+    Pre-tokenize text using GPT-2 regex pattern and count occurrences.
+
+    Splits text into pre-tokens (words, contractions, numbers, punctuation, whitespace)
+    using the GPT-2 tokenization pattern. Each pre-token is encoded as a tuple of
+    byte values (integers 0-255).
+
+    Args:
+        text: The input text to pre-tokenize.
+
+    Returns:
+        A dictionary mapping pre-token byte tuples to their occurrence counts.
+        Keys are tuples of integers (byte values), values are counts.
+    """
+    pretoken_counts = defaultdict(int)
+    PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+    for match in re.finditer(PAT, text):
+        pretoken_counts[tuple(match.group(0).encode("utf-8"))] += 1
+    return pretoken_counts
+
+
+def merge(t: tuple[int, ...], pair: tuple[int, int], new_index: int) -> tuple[int, ...]:
+    """
+    Merge all occurrences of a byte pair in a token sequence.
+
+    Replaces every adjacent (pair[0], pair[1]) in the tuple with new_index.
+
+    Args:
+        t: A tuple of token IDs representing a pre-token.
+        pair: The byte pair (two adjacent token IDs) to merge.
+        new_index: The new token ID to replace the merged pair with.
+
+    Returns:
+        A new tuple with all occurrences of the pair merged into new_index.
+
+    Example:
+        >>> merge((104, 101, 108, 108, 111), (108, 108), 256)
+        (104, 101, 256, 111)
+    """
+    new_key = []
+    i = 0
+    while i < len(t):
+        if (
+            i + 1 < len(t) and (t[i], t[i + 1]) == pair
+        ):  # i+1<len(t) checks next element exists
+            new_key.append(new_index)
+            i += 2  # If current and the next element is merged, skip to element after next.
+        else:
+            new_key.append(t[i])
+            i += 1
+    return tuple(new_key)
+
+
+def update_pretoken_counts(
+    pretoken_counts: dict[tuple[int, ...], int],
+    pair: tuple[int, int],
+    new_index: int,
+) -> dict[tuple[int, ...], int]:
+    """
+    Apply a merge operation to all pre-tokens and aggregate counts.
+
+    For each pre-token in the counts dictionary, merges the given byte pair
+    and combines counts for any pre-tokens that become identical after merging.
+
+    Args:
+        pretoken_counts: Dictionary mapping pre-token tuples to their counts.
+        pair: The byte pair to merge in all pre-tokens.
+        new_index: The new token ID for the merged pair.
+
+    Returns:
+        Updated dictionary with merged pre-tokens and aggregated counts.
+    """
+    d = defaultdict(int)
+    for key, value in pretoken_counts.items():
+        key = merge(key, pair, new_index)
+        d[key] += value
+    return d
+
+
+def train_bpe(
+    path: str,
+    vocab_size: int,
+    special_tokens: list[str],
+) -> tuple[dict[int, bytes], list[tuple[int, int]]]:
+    """
+    Train a Byte Pair Encoding (BPE) tokenizer on a text corpus.
+
+    Starting from a base vocabulary of 256 single bytes plus special tokens,
+    iteratively finds the most frequent adjacent byte pair across all pre-tokens
+    and merges them into a new token until the desired vocabulary size is reached.
+
+    Args:
+        path: Path to the training text file.
+        vocab_size: Target vocabulary size (must be >= 256 + len(special_tokens)).
+        special_tokens: List of special token strings to include in the vocabulary.
+
+    Returns:
+        A tuple containing:
+        - vocab: Dictionary mapping token IDs to their byte representations.
+        - merges: List of (token_id_1, token_id_2) tuples in the order they were merged.
+    """
+    merges = []
+
+    vocab = initialise_vocab(special_tokens)
+    print(f"initial vocab size: {len(vocab)}")
+    with open(path, "rb") as f:
+        text = f.read().replace("\n", "")
+    print(f"Read text chunk of length {len(text)} characters.")
+    pretoken_counts = get_pretoken_counts(text)
+
+    new_index = max(vocab.keys())
+    while len(vocab) < vocab_size:
+        byte_pair_count = defaultdict(int)
+        new_index += 1
+        for k, v in pretoken_counts.items():
+            for j in range(len(k) - 1):
+                pair = (k[j], k[j + 1])
+                byte_pair_count[pair] += v
+
+        most_frequent_byte_pair = max(
+            byte_pair_count, key=lambda key: (byte_pair_count[key], key)
+        )
+        merges.append(most_frequent_byte_pair)
+        vocab[new_index] = (
+            vocab[most_frequent_byte_pair[0]] + vocab[most_frequent_byte_pair[1]]
+        )
+        pretoken_counts = update_pretoken_counts(
+            pretoken_counts, most_frequent_byte_pair, new_index
+        )
+    return vocab, merges
