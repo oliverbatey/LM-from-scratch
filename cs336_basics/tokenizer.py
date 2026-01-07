@@ -180,7 +180,7 @@ def train_bpe(
     path: str,
     vocab_size: int,
     special_tokens: list[str],
-) -> tuple[dict[int, bytes], list[tuple[int, int]]]:
+) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
     """
     Train a Byte Pair Encoding (BPE) tokenizer on a text corpus.
 
@@ -202,7 +202,7 @@ def train_bpe(
 
     vocab = initialise_vocab(special_tokens)
     print(f"initial vocab size: {len(vocab)}")
-    with open(path, "rb") as f:
+    with open(path, "r") as f:
         text = f.read().replace("\n", "")
     print(f"Read text chunk of length {len(text)} characters.")
     pretoken_counts = get_pretoken_counts(text)
@@ -221,7 +221,7 @@ def train_bpe(
         )
         merges.append(most_frequent_byte_pair)
         vocab[new_index] = (
-            vocab[most_frequent_byte_pair[0]] + vocab[most_frequent_byte_pair[1]]
+            most_frequent_byte_pair[0] + most_frequent_byte_pair[1]
         )
         pretoken_counts = update_pretoken_counts(
             pretoken_counts, most_frequent_byte_pair, new_index
