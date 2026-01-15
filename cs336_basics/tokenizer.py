@@ -198,14 +198,16 @@ def train_bpe(
         - vocab: Dictionary mapping token IDs to their byte representations.
         - merges: List of (token_id_1, token_id_2) tuples in the order they were merged.
     """
-    merges = []
+    merges: list[tuple[bytes, bytes]] = []
 
     vocab = initialise_vocab(special_tokens)
-    print(f"initial vocab size: {len(vocab)}")
     with open(path, "r") as f:
         text = f.read().replace("\n", "")
-    print(f"Read text chunk of length {len(text)} characters.")
-    pretoken_counts = get_pretoken_counts(text)
+
+    pretoken_counts = defaultdict(int)
+    for chunk in re.split("|".join([re.escape(t) for t in special_tokens]), text):
+        for pretoken, count in get_pretoken_counts(chunk).items():
+            pretoken_counts[pretoken] += count
 
     new_index = max(vocab.keys())
     while len(vocab) < vocab_size:
@@ -219,9 +221,9 @@ def train_bpe(
         most_frequent_byte_pair = max(
             byte_pair_count, key=lambda key: (byte_pair_count[key], key)
         )
-        merges.append(most_frequent_byte_pair)
+        merges.append((vocab[most_frequent_byte_pair[0]], vocab[most_frequent_byte_pair[1]]))
         vocab[new_index] = (
-            most_frequent_byte_pair[0] + most_frequent_byte_pair[1]
+            vocab[most_frequent_byte_pair[0]] + vocab[most_frequent_byte_pair[1]]
         )
         pretoken_counts = update_pretoken_counts(
             pretoken_counts, most_frequent_byte_pair, new_index
