@@ -221,7 +221,8 @@ def train(
                 byte_pair_count[pair] += v
 
         most_frequent_byte_pair = max(
-            byte_pair_count, key=lambda key: (byte_pair_count[key], key)
+            # Tie-breaking with the lexographically greatest pair in __bytes__ representation, hence vocab[key[0]], vocab[key[1]]
+            byte_pair_count, key=lambda key: (byte_pair_count[key], vocab[key[0]], vocab[key[1]])
         )
         merges.append((vocab[most_frequent_byte_pair[0]], vocab[most_frequent_byte_pair[1]]))
         vocab[new_index] = (
