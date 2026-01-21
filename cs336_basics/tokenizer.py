@@ -1,8 +1,71 @@
 import os
+import cProfile
 import regex as re
 
 from collections import defaultdict, Counter
-from typing import BinaryIO
+from typing import BinaryIO, Iterable
+
+class SequenceRegister:
+    def __init__(self, pretoken_counts: dict[tuple[int, ...], int]):
+        self.pretoken_counts = pretoken_counts
+        self.sequence_weights: dict[int, int] = dict()
+        self.sequence_tokens: dict[int, tuple[int, ...]] = dict()
+
+    def _build_sequence_registry(self):
+        for seq_id, sequence in enumerate(self.pretoken_counts):
+            self.sequence_weights[seq_id] = self.pretoken_counts[sequence]
+            self.sequence_tokens[seq_id] = sequence
+
+    def _validate_registry(self):
+        assert len(self.pretoken_counts) == len(self.sequence_weights), "Registry has a different number of elements than the pretoken counts"
+        assert sum(self.sequence_weights.values()) == sum(self.pretoken_counts.values())
+        for seq_id, sequence in self.sequence_tokens.items():
+            assert self.sequence_weights[seq_id] == self.pretoken_counts[sequence]
+
+    def build_sequence_registry(self):
+        self._build_sequence_registry()
+        self._validate_registry()
+
+class Sequence:
+    def __init__(self, seq_id: int):
+        self.head: Symbol = Symbol(symbol_id=None, node_id=None, seq_id=seq_id)
+        self.tail: Symbol = Symbol(symbol_id=None, node_id=None, seq_id=seq_id)
+        self.head.prev=None
+        self.head.next=self.tail
+        self.tail.prev=self.head
+        self.tail.next=None
+        self.seq_id = seq_id
+
+    def __iter__(self):
+        s = self.head
+        while s:
+            yield s
+            s = s.next
+
+    def insert_at_head(self, s: Symbol):
+        new_node = Symbol
+        new_node.next = self.head
+        self.head.prev = new_node
+        self.head = new_node
+
+    def insert_at_tail(self, s: Symbol):
+        ...
+
+    def merge_at(self, s: Symbol, new_symbol: Symbol):
+        ...
+
+    @classmethod
+    def from_tokens(self, seq_id: int, tokens: Iterable[int]):
+        ...
+
+class Symbol:
+    def __init__(self, node_id: int, symbol_id: int, seq_id: int):
+        self.node_id = node_id  # Unique id for the node.
+        self.symbol_id = symbol_id  # This is the id of the symbol in the vocabulary.
+        self.seq_id = seq_id  # An id for the sequence that the symbol belongs to.
+        self.next = None
+        self.prev = None
+        self.alive = True
 
 
 def find_chunk_boundaries(
@@ -116,11 +179,13 @@ def merge(t: tuple[int, ...], pair: tuple[int, int], new_index: int) -> tuple[in
         >>> merge((104, 101, 108, 108, 111), (108, 108), 256)
         (104, 101, 256, 111)
     """
+    seen = set()
     new_key = []
     i = 0
-    while i < len(t):
+    token_sequence_length = len(t)
+    while i < token_sequence_length:
         if (
-            i + 1 < len(t) and (t[i], t[i + 1]) == pair
+            i + 1 < token_sequence_length and (t[i], t[i + 1]) == pair
         ):  # i+1<len(t) checks next element exists
             new_key.append(new_index)
             i += 2  # If current and the next element is merged, skip to element after next.
@@ -221,7 +286,7 @@ def train(
                 byte_pair_count[pair] += v
 
         most_frequent_byte_pair = max(
-            # Tie-breaking with the lexographically greatest pair in __bytes__ representation, hence vocab[key[0]], vocab[key[1]]
+            # Tie-breaking with the lexographically greatest pair in bytes representation, NOT integer token ID representation.
             byte_pair_count, key=lambda key: (byte_pair_count[key], vocab[key[0]], vocab[key[1]])
         )
         merges.append((vocab[most_frequent_byte_pair[0]], vocab[most_frequent_byte_pair[1]]))
@@ -257,3 +322,33 @@ def train_bpe(
     """
     pretoken_counts = build_pretoken_counts(path, special_tokens)
     return train(pretoken_counts, vocab_size, special_tokens)
+
+
+def build_sequence_registry(
+    pretoken_counts: dict[tuple[int, ...], int]
+) -> tuple[dict[int, int], dict[int, tuple[int, ...]]]:
+    sequence_weight = defaultdict(int)
+    sequence_tokens = dict()
+    for seq_id, sequence in enumerate(pretoken_counts):
+        sequence_weight[seq_id] += pretoken_counts[sequence]
+        sequence_tokens[seq_id] = sequence
+    return sequence_weight, sequence_tokens
+
+
+
+
+
+if __name__ == "__main__":
+    path = "data/TinyStoriesV2-GPT4-valid.txt"
+    vocab_size=1000
+    special_tokens = ["<|endoftext|>"]
+    pretoken_counts = build_pretoken_counts(path=path, special_tokens=special_tokens)
+    register = SequenceRegister(pretoken_counts)
+    register.build_sequence_registry()
+    sequence_weights = register.sequence_weights
+    sequence_tokens = register.sequence_tokens
+
+    cProfile.run(
+        "train_bpe(path, vocab_size, special_tokens)",
+        sort="cumtime",
+    )
