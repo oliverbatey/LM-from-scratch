@@ -5,7 +5,7 @@ import regex as re
 from collections import defaultdict, Counter
 from typing import BinaryIO, Iterable
 
-class SequenceRegister:
+class TokenSequenceRegister:
     def __init__(self, pretoken_counts: dict[tuple[int, ...], int]):
         self.pretoken_counts = pretoken_counts
         self.sequence_weights: dict[int, int] = dict()
@@ -26,10 +26,11 @@ class SequenceRegister:
         self._build_sequence_registry()
         self._validate_registry()
 
-class Sequence:
+class TokenSequence:
     def __init__(self, seq_id: int):
-        self.head: Symbol = Symbol(symbol_id=None, node_id=None, seq_id=seq_id)
-        self.tail: Symbol = Symbol(symbol_id=None, node_id=None, seq_id=seq_id)
+        """Initialise a TokenSequence with sentinel TokenNodes"""
+        self.head: TokenNode = TokenNode(symbol_id=None, node_id=None, seq_id=seq_id)
+        self.tail: TokenNode = TokenNode(symbol_id=None, node_id=None, seq_id=seq_id)
         self.head.prev=None
         self.head.next=self.tail
         self.tail.prev=self.head
@@ -42,27 +43,27 @@ class Sequence:
             yield s
             s = s.next
 
-    def insert_at_head(self, s: Symbol):
-        new_node = Symbol
+    def insert_at_head(self, s: TokenNode):
+        new_node = TokenNode
         new_node.next = self.head
         self.head.prev = new_node
         self.head = new_node
 
-    def insert_at_tail(self, s: Symbol):
+    def insert_at_tail(self, s: TokenNode):
         ...
 
-    def merge_at(self, s: Symbol, new_symbol: Symbol):
+    def merge_at(self, s: TokenNode, new_symbol: TokenNode):
         ...
 
     @classmethod
     def from_tokens(self, seq_id: int, tokens: Iterable[int]):
         ...
 
-class Symbol:
+class TokenNode:
     def __init__(self, node_id: int, symbol_id: int, seq_id: int):
         self.node_id = node_id  # Unique id for the node.
-        self.symbol_id = symbol_id  # This is the id of the symbol in the vocabulary.
-        self.seq_id = seq_id  # An id for the sequence that the symbol belongs to.
+        self.symbol_id = symbol_id  # This is the id of the TokenNode in the vocabulary.
+        self.seq_id = seq_id  # An id for the TokenSequence that the TokenNode belongs to.
         self.next = None
         self.prev = None
         self.alive = True
@@ -343,7 +344,7 @@ if __name__ == "__main__":
     vocab_size=1000
     special_tokens = ["<|endoftext|>"]
     pretoken_counts = build_pretoken_counts(path=path, special_tokens=special_tokens)
-    register = SequenceRegister(pretoken_counts)
+    register = TokenSequenceRegister(pretoken_counts)
     register.build_sequence_registry()
     sequence_weights = register.sequence_weights
     sequence_tokens = register.sequence_tokens
