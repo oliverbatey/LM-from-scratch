@@ -37,8 +37,8 @@ class Sequence:
         self.seq_id = seq_id
 
     def __iter__(self):
-        s = self.head
-        while s:
+        s = self.head.next
+        while s is not self.tail:
             yield s
             s = s.next
 
