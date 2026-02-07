@@ -138,10 +138,6 @@ class TokenSequenceRegister:
                 if (token.next is not token_seq.tail) and (token.alive and token.next.alive):
                     self.pair_occurrences[(token.symbol_id, token.next.symbol_id)].append(token)
 
-    @staticmethod
-    def _invert_bytes(bytearray: bytes) -> bytes:
-        return bytes([255 - b for b in bytearray])
-
     def _build_pair_count_heap(self):
         self.pair_counts = {(97, 98): 10, (97, 99): 10, (97, 111): 10, (55, 11): 2}
         for pair, pair_count in self.pair_counts.items():
@@ -162,6 +158,18 @@ class TokenSequenceRegister:
             neg_count, tie_key, pair = heapq.heappop(self.pair_count_heap)
         return pair
 
+    @staticmethod
+    def _invert_bytes(bytearray: bytes) -> bytes:
+        return bytes([255 - b for b in bytearray])
+
+    @staticmethod
+    def is_valid_occurrence_handle(left: Optional[TokenNode], target_pair: tuple[int, int]) -> bool:
+        if left is None or not left.alive or left.symbol_id is None:
+            return False
+        right = left.next
+        if right is None or not right.alive or right.symbol_id is None:
+            return False
+        return (left.symbol_id, right.symbol_id) == target_pair
 
     # TODO: update validation to expect linked list structure
     def _validate_build_sequence_registry(self):
