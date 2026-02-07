@@ -1,3 +1,4 @@
+import heapq
 import os
 import cProfile
 import regex as re
@@ -104,12 +105,15 @@ class TokenSequence:
 
 
 class TokenSequenceRegister:
-    def __init__(self, pretoken_counts: dict[tuple[int, ...], int]):
+    def __init__(self, pretoken_counts: dict[tuple[int, ...], int], special_tokens: list[str]):
         self.pretoken_counts = pretoken_counts
         self.sequence_weights: dict[int, int] = dict()
         self.sequence_tokens: dict[int, TokenSequence] = dict()
         self.pair_counts: dict[tuple[int, int], int] = defaultdict(int)
         self.pair_occurrences: dict[tuple[int, int], list[TokenNode]] = defaultdict(list)
+        self.pair_count_heap: list[tuple[int, tuple[bytes, bytes], tuple[int, int]]] = []
+        self.merges: list[tuple[bytes, bytes]] = []
+        self.vocab: dict[int, bytes] = initialise_vocab(special_tokens)
         self.build_sequence_registry()
 
     def _create_token_node(self, symbol_id: int, seq_id, **kwargs) -> TokenNode:
@@ -134,6 +138,30 @@ class TokenSequenceRegister:
                 if (token.next is not token_seq.tail) and (token.alive and token.next.alive):
                     self.pair_occurrences[(token.symbol_id, token.next.symbol_id)].append(token)
 
+    @staticmethod
+    def _invert_bytes(bytearray: bytes) -> bytes:
+        return bytes([255 - b for b in bytearray])
+
+    def _build_pair_count_heap(self):
+        self.pair_counts = {(97, 98): 10, (97, 99): 10, (97, 111): 10, (55, 11): 2}
+        for pair, pair_count in self.pair_counts.items():
+
+            self.pair_count_heap.append(
+                (
+                    -1 * pair_count,
+                    (TokenSequenceRegister._invert_bytes(self.vocab[pair[0]]), TokenSequenceRegister._invert_bytes(self.vocab[pair[1]])),
+                     pair
+                )
+            )
+        heapq.heapify(self.pair_count_heap)
+
+    def get_max_byte_pair(self):
+        neg_count, _, pair = heapq.heappop(self.pair_count_heap)
+        current_count = self.pair_counts[pair]
+        while -1*neg_count != current_count and current_count > 0:  # Checks for stale counts on the heap
+            neg_count, tie_key, pair = heapq.heappop(self.pair_count_heap)
+        return pair
+
 
     # TODO: update validation to expect linked list structure
     def _validate_build_sequence_registry(self):
@@ -154,6 +182,7 @@ class TokenSequenceRegister:
         self._build_sequence_registry()
         self._build_pair_counts()
         self._build_pair_occurances()
+        self._build_pair_count_heap()
         self._validate()
 
 
@@ -338,6 +367,7 @@ def build_pretoken_counts(
                     pretoken_counts[pretoken] += count
     return pretoken_counts
 
+
 def train(
     pretoken_counts: dict[tuple[int, ...], int],
     vocab_size: int,
@@ -414,11 +444,12 @@ def train_bpe(
 
 
 if __name__ == "__main__":
-    path = "data/TinyStoriesV2-GPT4-valid.txt"
+    #path = "data/TinyStoriesV2-GPT4-valid.txt"
+    path = "cs336_basics/assets/smallcorpus.txt"
     vocab_size=1000
     special_tokens = ["<|endoftext|>"]
     pretoken_counts = build_pretoken_counts(path=path, special_tokens=special_tokens)
-    register = TokenSequenceRegister(pretoken_counts)
+    register = TokenSequenceRegister(pretoken_counts, special_tokens)
     sequence_weights = register.sequence_weights
     sequence_tokens = register.sequence_tokens
     pair_counts = register.pair_counts
