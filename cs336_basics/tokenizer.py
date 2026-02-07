@@ -139,7 +139,6 @@ class TokenSequenceRegister:
                     self.pair_occurrences[(token.symbol_id, token.next.symbol_id)].append(token)
 
     def _build_pair_count_heap(self):
-        self.pair_counts = {(97, 98): 10, (97, 99): 10, (97, 111): 10, (55, 11): 2}
         for pair, pair_count in self.pair_counts.items():
 
             self.pair_count_heap.append(
