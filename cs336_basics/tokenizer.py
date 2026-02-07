@@ -4,7 +4,7 @@ import cProfile
 import regex as re
 
 from collections import defaultdict, Counter
-from typing import BinaryIO, Callable, Iterable
+from typing import BinaryIO, Callable, Iterable, Optional
 
 
 class TokenNode:
