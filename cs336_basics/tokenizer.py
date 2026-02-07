@@ -132,7 +132,7 @@ class TokenSequenceRegister:
                 pair = (k[j], k[j + 1])
                 self.pair_counts[pair] += v
 
-    def _build_pair_occurances(self):
+    def _build_pair_occurrences(self):
         for seq_id, token_seq in self.sequence_tokens.items():
             for token in token_seq:
                 if (token.next is not token_seq.tail) and (token.alive and token.next.alive):
@@ -177,18 +177,18 @@ class TokenSequenceRegister:
     def _validate_build_pair_counts(self):
         ...
 
-    def _validate_build_pair_occurances(self):
+    def _validate_build_pair_occurrences(self):
         ...
 
     def _validate(self):
         self._validate_build_sequence_registry()
         self._validate_build_pair_counts()
-        self._validate_build_pair_occurances()
+        self._validate_build_pair_occurrences()
 
     def build_sequence_registry(self):
         self._build_sequence_registry()
         self._build_pair_counts()
-        self._build_pair_occurances()
+        self._build_pair_occurrences()
         self._build_pair_count_heap()
         self._validate()
 
