@@ -4,8 +4,8 @@ import cProfile
 import regex as re
 
 from collections import defaultdict, Counter
+from multiprocessing import Pool
 from typing import BinaryIO, Callable, Iterable, Optional
-
 
 class TokenNode:
     def __init__(self, symbol_id: int, seq_id: int):
@@ -367,6 +367,19 @@ def update_pretoken_counts(
         d[key] += value
     return d
 
+
+def _process_chunk(args):
+    path, start, end, split_pattern = args
+    pretoken_counts = defaultdict(int)
+    with open(path, "rb") as f:
+        f.seek(start)
+        chunk = f.read(end - start).decode("utf-8", errors="ignore")
+    for subchunk in re.split(split_pattern, chunk):
+        for pretoken, count in get_pretoken_counts(subchunk).items():
+            pretoken_counts[pretoken] += count
+    return pretoken_counts
+
+
 def build_pretoken_counts(
     path: str, special_tokens: list[str], num_processes: int = 4
 ) -> dict[tuple[int, ...], int]:
@@ -386,14 +399,20 @@ def build_pretoken_counts(
     """
     with open(path, "rb") as f:
         boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
-        pretoken_counts = defaultdict(int)
-        split_pattern = "|".join([re.escape(t) for t in special_tokens])
-        for start, end in zip(boundaries[:-1], boundaries[1:]):
-            f.seek(start)
-            chunk = f.read(end - start).decode("utf-8", errors="ignore")
-            for subchunk in re.split(split_pattern, chunk):
-                for pretoken, count in get_pretoken_counts(subchunk).items():
-                    pretoken_counts[pretoken] += count
+
+    split_pattern = "|".join([re.escape(t) for t in special_tokens])
+    chunk_args = [
+        (path, start, end, split_pattern)
+        for start, end in zip(boundaries[:-1], boundaries[1:])
+    ]
+
+    with Pool(processes=num_processes) as pool:
+        chunk_counts = pool.map(_process_chunk, chunk_args)
+
+    pretoken_counts = defaultdict(int)
+    for counts in chunk_counts:
+        for pretoken, count in counts.items():
+            pretoken_counts[pretoken] += count
     return pretoken_counts
 
 
@@ -545,6 +564,6 @@ if __name__ == "__main__":
 
 
     cProfile.run(
-        "train(pretoken_counts, vocab_size, special_tokens)",
+        "train_bpe(path, vocab_size, special_tokens)",
         sort="cumtime",
     )
