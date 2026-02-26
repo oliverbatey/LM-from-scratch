@@ -114,6 +114,7 @@ class TokenSequenceRegister:
         self.pair_count_heap: list[tuple[int, tuple[bytes, bytes], tuple[int, int]]] = []
         self.merges: list[tuple[bytes, bytes]] = []
         self.vocab: dict[int, bytes] = initialise_vocab(special_tokens)
+        self._tie_break_cache: dict[int, tuple[int, ...]] = self._build_tie_break_cache()
         self.build_sequence_registry()
 
     def _create_token_node(self, symbol_id: int, seq_id, **kwargs) -> TokenNode:
@@ -143,7 +144,7 @@ class TokenSequenceRegister:
             self.pair_count_heap.append(
                 (
                     -pair_count,
-                    TokenSequenceRegister._tie_break_key(self.vocab, pair),
+                    self._tie_break_key(pair),
                     pair,
                 )
             )
@@ -163,21 +164,24 @@ class TokenSequenceRegister:
                 self.pair_count_heap,
                 (
                     -count,
-                    TokenSequenceRegister._tie_break_key(self.vocab, pair),
+                    self._tie_break_key(pair),
                     pair,
                 ),
             )
 
-    @staticmethod
-    def _tie_break_key(vocab: dict[int, bytes], pair: tuple[int, int]) -> tuple[tuple[int, ...], tuple[int, ...]]:
-        # Negated bytes with a positive sentinel to reverse lexicographic order.
-        # Negated bytes are all <= 0, so the sentinel (1) sorts after any byte,
-        # ensuring that longer originals (e.g. b' a' > b' ') map to smaller keys.
+    def _tie_break_key(self, pair: tuple[int, int]) -> tuple[tuple[int, ...], tuple[int, ...]]:
+        return (self._tie_break_cache[pair[0]], self._tie_break_cache[pair[1]])
+
+    def _build_tie_break_cache(self) -> dict[int, tuple[int, ...]]:
         sentinel = (1,)
-        return (
-            tuple(-b for b in vocab[pair[0]]) + sentinel,
-            tuple(-b for b in vocab[pair[1]]) + sentinel,
-        )
+        return {
+            token_id: tuple(-b for b in token_bytes) + sentinel
+            for token_id, token_bytes in self.vocab.items()
+        }
+
+    def cache_tie_break_key(self, token_id: int):
+        sentinel = (1,)
+        self._tie_break_cache[token_id] = tuple(-b for b in self.vocab[token_id]) + sentinel
 
     @staticmethod
     def is_valid_occurrence_handle(left: Optional[TokenNode], target_pair: tuple[int, int]) -> bool:
@@ -409,6 +413,7 @@ def train_fast(
             break
 
         reg.vocab[new_index] = reg.vocab[most_frequent_byte_pair[0]] + reg.vocab[most_frequent_byte_pair[1]]
+        reg.cache_tie_break_key(new_index)
         reg.merges.append((reg.vocab[most_frequent_byte_pair[0]], reg.vocab[most_frequent_byte_pair[1]]))
 
         occurrences = reg.pair_occurrences[most_frequent_byte_pair]
@@ -527,20 +532,19 @@ def train_bpe(
 
 
 if __name__ == "__main__":
-    #path = "data/TinyStoriesV2-GPT4-valid.txt"
-    path = "cs336_basics/assets/smallcorpus.txt"
+    path = "data/TinyStoriesV2-GPT4-valid.txt"
+    #path = "cs336_basics/assets/smallcorpus.txt"
     vocab_size=1000
     special_tokens = ["<|endoftext|>"]
     pretoken_counts = build_pretoken_counts(path=path, special_tokens=special_tokens)
-    register = TokenSequenceRegister(pretoken_counts, special_tokens)
-    sequence_weights = register.sequence_weights
-    sequence_tokens = register.sequence_tokens
-    pair_counts = register.pair_counts
-    pair_occurrences = register.pair_occurrences
+    # register = TokenSequenceRegister(pretoken_counts, special_tokens)
+    # sequence_weights = register.sequence_weights
+    # sequence_tokens = register.sequence_tokens
+    # pair_counts = register.pair_counts
+    # pair_occurrences = register.pair_occurrences
 
 
-    breakpoint()
-    # cProfile.run(
-    #     "train_bpe(path, vocab_size, special_tokens)",
-    #     sort="cumtime",
-    # )
+    cProfile.run(
+        "train(pretoken_counts, vocab_size, special_tokens)",
+        sort="cumtime",
+    )
