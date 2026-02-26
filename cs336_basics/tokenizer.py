@@ -393,6 +393,64 @@ def build_pretoken_counts(
     return pretoken_counts
 
 
+
+def train_fast(
+    pretoken_counts: dict[tuple[int, ...], int],
+    vocab_size: int,
+    special_tokens: list[str],
+) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
+
+    reg = TokenSequenceRegister(pretoken_counts, special_tokens)
+    new_index = max(reg.vocab.keys()) + 1
+
+    while len(reg.vocab) < vocab_size:
+        most_frequent_byte_pair = reg.get_max_byte_pair()
+        if most_frequent_byte_pair is None:
+            break
+
+        reg.vocab[new_index] = reg.vocab[most_frequent_byte_pair[0]] + reg.vocab[most_frequent_byte_pair[1]]
+        reg.merges.append((reg.vocab[most_frequent_byte_pair[0]], reg.vocab[most_frequent_byte_pair[1]]))
+
+        occurrences = reg.pair_occurrences[most_frequent_byte_pair]
+
+        for left_node in occurrences:
+            if not TokenSequenceRegister.is_valid_occurrence_handle(left_node, most_frequent_byte_pair):
+                continue
+
+            w = reg.sequence_weights[left_node.seq_id]
+            token_seq = reg.sequence_tokens[left_node.seq_id]
+            right_node = left_node.next
+            x_node = left_node.prev
+            y_node = right_node.next
+
+            # Decrement counts for pairs destroyed by this merge
+            reg.pair_counts[most_frequent_byte_pair] -= w
+            if x_node.symbol_id is not None:
+                pair_xa = (x_node.symbol_id, left_node.symbol_id)
+                reg.pair_counts[pair_xa] -= w
+                reg._push_pair_to_heap(pair_xa)
+            if y_node.symbol_id is not None:
+                pair_by = (right_node.symbol_id, y_node.symbol_id)
+                reg.pair_counts[pair_by] -= w
+                reg._push_pair_to_heap(pair_by)
+
+            X, C, Y = token_seq.merge_at(left_node, new_index)
+
+            # Increment counts for new pairs created by this merge
+            if X.symbol_id is not None:
+                reg.pair_counts[(X.symbol_id, C.symbol_id)] += w
+                reg.pair_occurrences[(X.symbol_id, C.symbol_id)].append(X)
+                reg._push_pair_to_heap((X.symbol_id, C.symbol_id))
+            if Y.symbol_id is not None:
+                reg.pair_counts[(C.symbol_id, Y.symbol_id)] += w
+                reg.pair_occurrences[(C.symbol_id, Y.symbol_id)].append(C)
+                reg._push_pair_to_heap((C.symbol_id, Y.symbol_id))
+
+        new_index += 1
+
+    return reg.vocab, reg.merges
+
+
 def train(
     pretoken_counts: dict[tuple[int, ...], int],
     vocab_size: int,
@@ -465,7 +523,7 @@ def train_bpe(
         - merges: List of (token_id_1, token_id_2) tuples in the order they were merged.
     """
     pretoken_counts = build_pretoken_counts(path, special_tokens)
-    return train(pretoken_counts, vocab_size, special_tokens)
+    return train_fast(pretoken_counts, vocab_size, special_tokens)
 
 
 if __name__ == "__main__":
