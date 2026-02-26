@@ -140,12 +140,11 @@ class TokenSequenceRegister:
 
     def _build_pair_count_heap(self):
         for pair, pair_count in self.pair_counts.items():
-
             self.pair_count_heap.append(
                 (
-                    -1 * pair_count,
-                    (TokenSequenceRegister._invert_bytes(self.vocab[pair[0]]), TokenSequenceRegister._invert_bytes(self.vocab[pair[1]])),
-                     pair
+                    -pair_count,
+                    TokenSequenceRegister._tie_break_key(self.vocab, pair),
+                    pair,
                 )
             )
         heapq.heapify(self.pair_count_heap)
@@ -157,9 +156,28 @@ class TokenSequenceRegister:
                 return pair
         return None
 
+    def _push_pair_to_heap(self, pair: tuple[int, int]):
+        count = self.pair_counts[pair]
+        if count > 0:
+            heapq.heappush(
+                self.pair_count_heap,
+                (
+                    -count,
+                    TokenSequenceRegister._tie_break_key(self.vocab, pair),
+                    pair,
+                ),
+            )
+
     @staticmethod
-    def _invert_bytes(bytearray: bytes) -> bytes:
-        return bytes([255 - b for b in bytearray])
+    def _tie_break_key(vocab: dict[int, bytes], pair: tuple[int, int]) -> tuple[tuple[int, ...], tuple[int, ...]]:
+        # Negated bytes with a positive sentinel to reverse lexicographic order.
+        # Negated bytes are all <= 0, so the sentinel (1) sorts after any byte,
+        # ensuring that longer originals (e.g. b' a' > b' ') map to smaller keys.
+        sentinel = (1,)
+        return (
+            tuple(-b for b in vocab[pair[0]]) + sentinel,
+            tuple(-b for b in vocab[pair[1]]) + sentinel,
+        )
 
     @staticmethod
     def is_valid_occurrence_handle(left: Optional[TokenNode], target_pair: tuple[int, int]) -> bool:
