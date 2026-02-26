@@ -151,11 +151,11 @@ class TokenSequenceRegister:
         heapq.heapify(self.pair_count_heap)
 
     def get_max_byte_pair(self):
-        neg_count, _, pair = heapq.heappop(self.pair_count_heap)
-        current_count = self.pair_counts[pair]
-        while -1*neg_count != current_count and current_count > 0:  # Checks for stale counts on the heap
-            neg_count, tie_key, pair = heapq.heappop(self.pair_count_heap)
-        return pair
+        while self.pair_count_heap:
+            neg_count, _, pair = heapq.heappop(self.pair_count_heap)
+            if -neg_count == self.pair_counts[pair]:
+                return pair
+        return None
 
     @staticmethod
     def _invert_bytes(bytearray: bytes) -> bytes:
